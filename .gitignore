@@ -11,6 +11,8 @@ token.json
 .env
 
 # editor/OS
+backup/
+cache/
 .vscode/
 .DS_Store
 Thumbs.db
