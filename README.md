@@ -9,7 +9,7 @@ Youtube Music Playlist Fixer is a program that detects and automatically replace
 
 - **Fixes playlists in Youtube Music by automatically replacing all unplayable/invalid songs in a playlist with valid alternative uploads
 while maintaining playlist sort order.
-- **Fixes include: Songs that have been removed, reuploaded, copyright-striked, unavailable in region/songs, and songs available on Youtube but
+- **Fixes include: Songs that have been removed, reuploaded, copyright-striked, unavailable in region, and songs available on Youtube but
 not Youtube Music.
 - **Prioritizes reuploads from the artist's official youtube channel over third party reuploads. 
 
