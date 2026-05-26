@@ -1,16 +1,23 @@
-# Python venv
+# Python venv (legacy)
 .venv/
 
 # Python bytecode
 __pycache__/
 *.pyc
 
-# secrets + credentials
+# JS / Node
+node_modules/
+build/
+
+# Secrets + credentials (never commit these)
 client_secret.json
 token.json
+oauth.json
+ytm_client.json
+YTMusic_secret.json
 .env
 
-# editor/OS
+# Editor / OS
 backup/
 cache/
 .vscode/
@@ -19,3 +26,6 @@ Thumbs.db
 
 # Notes
 notes/
+
+# Chrome extension .pem key (used for pinning extension ID — keep this private)
+*.pem

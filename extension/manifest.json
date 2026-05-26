@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Music Replacer",
+  "version": "0.1.0",
+  "description": "Find and replace unplayable tracks in your YouTube Music playlists.",
+
+  "key": "REPLACE_WITH_YOUR_EXTENSION_KEY_SEE_DOCS_SETUP_MD",
+
+  "oauth2": {
+    "client_id": "REPLACE_WITH_YOUR_CHROME_EXTENSION_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/youtube.force-ssl"]
+  },
+
+  "permissions": [
+    "identity",
+    "storage",
+    "sidePanel",
+    "scripting",
+    "activeTab",
+    "downloads",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "https://music.youtube.com/*",
+    "https://www.googleapis.com/*"
+  ],
+
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "js": ["src/content/index.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+
+  "action": {
+    "default_title": "YouTube Music Replacer"
+  }
+}

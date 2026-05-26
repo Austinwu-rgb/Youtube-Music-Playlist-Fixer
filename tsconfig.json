@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "outDir": "build",
+    "rootDir": "extension",
+    "paths": {
+      "@lib/*": ["./extension/src/lib/*"]
+    }
+  },
+  "include": ["extension/src/**/*", "vite.config.ts"]
+}

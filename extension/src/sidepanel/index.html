@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Music Replacer</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div id="logo">
+        <span class="logo-icon">♪</span>
+        <span class="logo-text">YTM Replacer</span>
+      </div>
+      <div id="account-bar" class="hidden">
+        <span id="channel-name" class="channel-name"></span>
+        <button id="btn-sign-out" class="btn-ghost btn-sm">Sign out</button>
+      </div>
+    </header>
+
+    <div id="quota-bar" class="quota-bar hidden">
+      <div id="quota-fill" class="quota-fill"></div>
+      <span id="quota-label" class="quota-label"></span>
+    </div>
+
+    <main id="main"></main>
+  </div>
+  <script type="module" src="./app.ts"></script>
+</body>
+</html>
