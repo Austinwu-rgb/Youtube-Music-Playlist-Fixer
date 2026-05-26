@@ -26,22 +26,32 @@ The compiled extension lands in `build/`.
 
 Unpacked extensions get a **random ID** on each machine unless you pin it via a `key` in `manifest.json`. OAuth clients are bound to a specific extension ID, so you must pin it first.
 
-1. Open `chrome://extensions` → enable **Developer mode**.
-2. Click **Pack extension**, select the `build/` folder. Chrome generates `build.pem`.
-3. Extract the base64 public key from the `.pem`:
+**Important:** Do **not** put a fake placeholder in the `key` field. If `manifest.json` has an invalid `key`, **Pack extension** will fail with `Value 'key' is missing or invalid.` Leave the `key` field out until after your first pack (see below).
+
+1. Run `npm run build` (the repo manifest has no `key` yet — that is correct).
+2. Open `chrome://extensions` (or `edge://extensions`) → enable **Developer mode**.
+3. Click **Pack extension**:
+   - **Extension root directory:** your `build/` folder
+   - **Private key file:** leave **empty** the first time
+4. Click **Pack extension**. The browser creates `build.pem` (and `build.crx`) in your project folder.
+5. Extract the **public** key (not the private key from the `.pem` file). From the project root:
 
 ```powershell
-# PowerShell
-$pem = Get-Content .\build.pem -Raw
-$b64 = $pem -replace "-----.*?-----\s*", "" -replace "\s", ""
-Write-Output $b64
+node -e "const c=require('crypto'),f=require('fs');const k=c.createPrivateKey(f.readFileSync('build.pem','utf8'));console.log(c.createPublicKey(k).export({type:'spki',format:'der'}).toString('base64'))"
 ```
 
-4. Open `extension/manifest.json` and replace the `key` placeholder with this base64 string.
-5. Re-run `npm run build`.
-6. In `chrome://extensions` click **Load unpacked**, select `build/`. Note the **Extension ID** shown.
+The output should start with `MIIBIj...` (public key). If it starts with `MIIEvQ...`, that is the **private** key — do not put that in the manifest.
 
-You will need this ID in Step 3.
+6. Open `extension/manifest.json` and add a `key` line **after** `"description"`:
+
+```json
+"key": "PASTE_THE_BASE64_STRING_HERE",
+```
+
+7. Re-run `npm run build`.
+8. In `chrome://extensions` click **Load unpacked**, select `build/`. Note the **Extension ID** shown.
+
+You will need this ID in Step 3. On future packs, select the same `build.pem` as the private key file so the ID stays the same.
 
 ---
 

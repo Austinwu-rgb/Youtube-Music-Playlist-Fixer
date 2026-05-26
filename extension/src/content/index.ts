@@ -64,9 +64,10 @@ async function handleMsg(msg: AppMsg): Promise<{ ok: boolean }> {
       cancelScan()
       return { ok: true }
 
-    case 'SCROLL_TO':
-      highlightAndScroll(msg.videoId)
-      return { ok: true }
+    case 'SCROLL_TO': {
+      const found = highlightAndScroll(msg.videoId, msg.title)
+      return { ok: true, found }
+    }
 
     case 'CLEAR_HIGHLIGHT':
       clearHighlight()

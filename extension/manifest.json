@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "description": "Find and replace unplayable tracks in your YouTube Music playlists.",
 
-  "key": "REPLACE_WITH_YOUR_EXTENSION_KEY_SEE_DOCS_SETUP_MD",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8B64jkrpOZpMw895+NMLkib+ebym3qOyh+LbcRSUWS8a8ZnG1VdrE3PUp58TfA1nuzXLbnVBe6rSCVzR3N81qEgv0oDQnKS6OYkhpgi3jw/9YQXDilifap2P6WXANQasEJ0B4yFJ8KoRFl+Q0+7gzC4AbSf4GEwzkSKZqAc81fFCBAmuF8o8c/tL1Q1zG/jYIvavYsOdoMPgpRY9o3K0jj/SB8/9pyUGrTqLIzAE88AUM9OQXokDjiMyxCTo+ZEKCrQPaV24XcGHC020UurnHvzUA1m07EVwpN5yt8utBa+LFmOvioj21OKEwZiAhmqBmQvcxrYxwXgXxXI4cc36GQIDAQAB",
 
   "oauth2": {
-    "client_id": "REPLACE_WITH_YOUR_CHROME_EXTENSION_CLIENT_ID.apps.googleusercontent.com",
+    "client_id": "964446596281-b8c8pj7cft1bib5sh1v9hk5uks3stfhh.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/youtube.force-ssl"]
   },
 

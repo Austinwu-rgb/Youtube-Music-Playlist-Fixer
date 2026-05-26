@@ -1,8 +1,12 @@
 // Handles scrollIntoView and visual highlight ring for a specific playlist row.
-// The highlight CSS is injected directly into the page as a <style> tag so it
-// survives YT Music's own style updates.
 
-import { SELECTORS, videoIdFromHref } from '../lib/dom-selectors.js'
+import {
+  queryAllRows,
+  videoIdFromHref,
+  SELECTORS,
+  isUnplayableRow,
+} from '../lib/dom-selectors.js'
+import { normalizeTitle } from '../lib/normalize-title.js'
 
 const HIGHLIGHT_CLASS = 'ytmr-highlight'
 const STYLE_ID = 'ytmr-highlight-style'
@@ -22,31 +26,48 @@ function ensureStyle(): void {
   document.head.appendChild(style)
 }
 
-/** Find the row element for a given videoId. */
-function findRow(videoId: string): Element | null {
-  const rows = document.querySelectorAll(SELECTORS.row)
-  for (const row of rows) {
-    const anchor = row.querySelector(SELECTORS.rowTitleLink)
-    if (anchor) {
-      const href = (anchor as HTMLAnchorElement).href
-      if (videoIdFromHref(href) === videoId) return row
-    }
+function rowTitle(row: Element): string {
+  const anchor = row.querySelector(SELECTORS.rowTitleLink) as HTMLAnchorElement | null
+  const titleEl =
+    anchor ?? (row.querySelector(SELECTORS.rowTitleText) as HTMLElement | null)
+  return titleEl?.textContent?.trim() || titleEl?.getAttribute('title')?.trim() || ''
+}
+
+function findRowByVideoId(videoId: string): Element | null {
+  for (const row of queryAllRows()) {
+    const anchor = row.querySelector(SELECTORS.rowTitleLink) as HTMLAnchorElement | null
+    if (anchor && videoIdFromHref(anchor.href) === videoId) return row
   }
   return null
 }
 
-/** Scroll the playlist row with this videoId into the centre of the viewport and add highlight ring. */
-export function highlightAndScroll(videoId: string): boolean {
+function findRowByTitle(title: string): Element | null {
+  const target = normalizeTitle(title)
+  if (!target) return null
+
+  for (const row of queryAllRows()) {
+    if (normalizeTitle(rowTitle(row)) !== target) continue
+    if (isUnplayableRow(row)) return row
+  }
+
+  // Fall back to any title match if the row is no longer marked unplayable
+  for (const row of queryAllRows()) {
+    if (normalizeTitle(rowTitle(row)) === target) return row
+  }
+
+  return null
+}
+
+export function highlightAndScroll(videoId: string, title?: string): boolean {
   ensureStyle()
   clearHighlight()
-  const row = findRow(videoId)
+  const row = findRowByVideoId(videoId) ?? (title ? findRowByTitle(title) : null)
   if (!row) return false
   row.classList.add(HIGHLIGHT_CLASS)
   row.scrollIntoView({ block: 'center', behavior: 'smooth' })
   return true
 }
 
-/** Remove highlight ring from all rows. */
 export function clearHighlight(): void {
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((el) => {
     el.classList.remove(HIGHLIGHT_CLASS)

@@ -1,39 +1,49 @@
 // Centralised YouTube Music DOM selectors.
 // When YT Music updates its UI, only this file needs editing.
-//
-// Verify these selectors against a live playlist with at least one broken
-// track by opening DevTools on music.youtube.com and running:
-//   document.querySelectorAll(SELECTORS.row)
-// Confirmed against YT Music Polymer UI as of May 2026.
 
 export const SELECTORS = {
-  // The main scrollable container for playlist content
-  scrollContainer: 'ytmusic-app-layout #main-panel',
+  // Scroll container candidates (tried in order by findScrollContainer)
+  scrollContainerCandidates: [
+    'ytmusic-playlist-shelf-renderer #contents',
+    'ytmusic-shelf-renderer #contents',
+    'ytmusic-browse-response #contents',
+    'ytmusic-tabbed-search-results-renderer #contents',
+    'ytmusic-app-layout #content',
+    'ytmusic-app-layout #main-panel',
+    '#page-manager',
+  ],
 
-  // Fallback scroll container if main-panel is absent
-  scrollContainerFallback: 'ytmusic-browse-response ytmusic-playlist-shelf-renderer',
+  // Row renderers used on playlist pages (try all)
+  rowSelectors: [
+    'ytmusic-responsive-list-item-renderer',
+    'ytmusic-two-row-item-renderer',
+  ],
 
-  // Each row / track item in the playlist
-  row: 'ytmusic-responsive-list-item-renderer',
+  rowTitleLink: 'a[href*="watch?v="], a[href*="v="]',
 
-  // Title link inside a row
-  rowTitleLink: 'a.yt-simple-endpoint[href*="watch?v="]',
+  rowTitleText: 'yt-formatted-string.title, .title-column .title, .title-column yt-formatted-string',
 
-  // Title text when there is no link (unplayable tracks often lose the anchor)
-  rowTitleText: '.title-column .title',
+  rowChannelText: '.secondary-flex-columns yt-formatted-string, .byline',
 
-  // Channel / artist text inside a row
-  rowChannelText: '.secondary-flex-columns yt-formatted-string',
+  playButton: '.play-button-shape button, ytmusic-play-button-renderer button, button[aria-label*="Play"]',
 
-  // Play button — absent or disabled on unplayable rows
-  playButton: '.play-button-shape button, ytmusic-play-button-renderer button',
+  unavailableTextHints: ['Unavailable', 'Not available', 'Video unavailable', "Can't play"],
 
-  // Thumbnail image — useful as a stable anchor for scrollIntoView
-  thumbnail: '.thumbnail-overlay-toggle-button-renderer, .yt-img-shadow',
-
-  // Unavailable text hint patterns shown by YT Music on greyed-out rows
-  unavailableTextHints: ['Unavailable', 'Not available', 'Video unavailable'],
+  // Playlist header track count, e.g. "3,324 tracks"
+  trackCountPattern: /([\d,]+)\s+tracks?\b/i,
 } as const
+
+/** Detect unplayable/greyed-out rows from YT Music DOM signals. */
+export function isUnplayableRow(el: Element): boolean {
+  // Only trust YT Music's explicit markers — secondary heuristics (placeholder
+  // thumbnails, missing watch links) fire on playable rows while virtual-scrolling.
+  if (el.hasAttribute('unplayable')) return true
+
+  const displayPolicy = el.getAttribute('display-policy') ?? ''
+  if (displayPolicy.includes('GREY_OUT')) return true
+
+  return false
+}
 
 /** Extract the videoId from a watch href like "/watch?v=abc123&..." */
 export function videoIdFromHref(href: string): string | null {
@@ -43,4 +53,41 @@ export function videoIdFromHref(href: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Query rows in light DOM and open shadow roots (YT Music uses both). */
+export function queryAllRows(): Element[] {
+  const seen = new Set<Element>()
+  const selectors = SELECTORS.rowSelectors.join(',')
+
+  function collect(root: Document | ShadowRoot | Element): void {
+    root.querySelectorAll(selectors).forEach((el) => seen.add(el))
+  }
+
+  collect(document)
+
+  function walk(root: Document | ShadowRoot): void {
+    collect(root)
+    root.querySelectorAll('*').forEach((el) => {
+      if (el.shadowRoot) walk(el.shadowRoot)
+    })
+  }
+
+  walk(document)
+
+  // Also pick up explicitly marked unplayable rows (may use different renderer nesting)
+  document
+    .querySelectorAll(
+      'ytmusic-responsive-list-item-renderer[unplayable], ytmusic-two-row-item-renderer[unplayable]',
+    )
+    .forEach((el) => seen.add(el))
+
+  return Array.from(seen)
+}
+
+/** Parse expected track count from playlist page header. */
+export function getExpectedTrackCount(): number | null {
+  const m = document.body.innerText.match(SELECTORS.trackCountPattern)
+  if (!m?.[1]) return null
+  return parseInt(m[1].replace(/,/g, ''), 10)
 }

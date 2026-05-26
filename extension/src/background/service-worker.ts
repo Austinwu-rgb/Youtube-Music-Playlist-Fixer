@@ -7,10 +7,12 @@ import { getToken, signOut as authSignOut } from '../lib/auth.js'
 import {
   getMyChannel,
   listPlaylistItems,
-  buildVideoIdMap,
-  batchCheckVideoExists,
-  fetchCurrentPosition,
+  fetchPlaylistItemByPiId,
+  resolveBrokenTrackApiItem,
+  cachePlaylistItems,
+  getCachedPlaylistItems,
   verifyPlaylistOwnership,
+  YouTubeApiError,
 } from '../lib/playlist.js'
 import { searchAndRank } from '../lib/search.js'
 import { insertAt, deleteItem } from '../lib/replace.js'
@@ -216,27 +218,27 @@ async function handleScanDone(rows: ScannedRow[]): Promise<void> {
 
   const unplayable = rows.filter((r) => r.isUnplayable)
 
-  // Fetch playlist items from API to get piId + position
+  // Fetch playlist items from API to get piId + position (DOM rows often lack videoId)
   const apiItems = await listPlaylistItems(state.playlistId)
-  const vidMap = buildVideoIdMap(apiItems)
-
-  // Cross-check: only keep items that exist on regular YouTube
-  const videoIds = unplayable.map((r) => r.videoId).filter(Boolean) as string[]
-  const existing = await batchCheckVideoExists(videoIds)
+  await cachePlaylistItems(state.playlistId, apiItems)
 
   const broken: BrokenTrack[] = []
+  const seenPiIds = new Set<string>()
   for (const row of unplayable) {
-    if (!row.videoId || !existing.has(row.videoId)) continue
-    const apiItem = vidMap.get(row.videoId)
-    if (!apiItem) continue
+    const apiItem = resolveBrokenTrackApiItem(row, apiItems)
+    if (!apiItem || seenPiIds.has(apiItem.piId)) continue
+    seenPiIds.add(apiItem.piId)
+
     broken.push({
-      videoId: row.videoId,
+      videoId: apiItem.videoId,
       title: row.title || apiItem.title,
       channelTitle: row.channelTitle || apiItem.channelTitle,
       position: apiItem.position,
       piId: apiItem.piId,
     })
   }
+
+  const scanIncomplete = rows.length < apiItems.length * 0.5
 
   if (broken.length === 0) {
     await saveSession({
@@ -248,6 +250,9 @@ async function handleScanDone(rows: ScannedRow[]): Promise<void> {
       skipped: 0,
       errored: 0,
       log: [],
+      scannedTotal: rows.length,
+      noBrokenFound: true,
+      scanIncomplete,
     })
     return
   }
@@ -268,12 +273,14 @@ async function handleScanDone(rows: ScannedRow[]): Promise<void> {
 
   // Scroll to first broken track
   const first = broken[0]
-  if (first) await scrollToTrack(first.videoId)
+  if (first) await scrollToTrack(first.videoId, first.title)
 }
 
 async function handleRequestCandidates(title: string, videoId: string): Promise<void> {
   const state = await loadSession()
-  if (state.view !== 'reviewing') throw new Error('Not in reviewing state')
+  if (state.view !== 'reviewing' && state.view !== 'fixing') {
+    throw new Error('Not in reviewing state')
+  }
 
   const candidates = await searchAndRank(title)
 
@@ -293,8 +300,10 @@ async function handleRequestCandidates(title: string, videoId: string): Promise<
     searchQuery: title,
   })
 
-  // Scroll to track while the candidate list loads
-  await scrollToTrack(videoId)
+  // Scroll when entering fixing from reviewing (not on in-place re-search)
+  if (state.view === 'reviewing') {
+    await scrollToTrack(videoId, title)
+  }
 }
 
 async function handleConfirmReplace(
@@ -318,26 +327,34 @@ async function handleConfirmReplace(
   }
 
   try {
-    // Back up before first edit
+    // Back up before first edit (reuse scan cache — avoid re-fetching huge playlists)
     if (!state.backupDone) {
-      const allItems = await listPlaylistItems(state.playlistId)
-      await downloadBackup(state.playlistId, allItems)
+      try {
+        const cached = await getCachedPlaylistItems(state.playlistId)
+        const allItems = cached ?? (await listPlaylistItems(state.playlistId))
+        await downloadBackup(state.playlistId, allItems)
+      } catch (backupErr) {
+        console.warn('Backup failed, continuing with replace:', backupErr)
+      }
     }
 
-    // Re-fetch current position (may have shifted from prior replacements)
-    const fresh = await fetchCurrentPosition(state.playlistId, current.videoId)
-    const position = fresh?.position ?? current.position
-    const freshPiId = fresh?.piId ?? piId
+    // Re-fetch by piId (reliable even when the same videoId appears more than once)
+    const fresh = await fetchPlaylistItemByPiId(current.piId)
+    if (!fresh) {
+      throw new Error(
+        `Could not find "${current.title}" in the playlist anymore. It may have been removed — try skipping.`,
+      )
+    }
 
     // Insert replacement at same position, then delete original
-    newPiId = await insertAt(state.playlistId, newVideoId, position)
-    await deleteItem(freshPiId)
+    newPiId = await insertAt(state.playlistId, newVideoId, fresh.position)
+    await deleteItem(fresh.piId)
 
     const candidateInfo = state.candidates.find((c) => c.videoId === newVideoId)
     logEntry.replacementVideoId = newVideoId
     logEntry.replacementTitle = candidateInfo?.title ?? newVideoId
   } catch (err) {
-    const error = err as Error
+    const error = friendlyApiError(err)
     logEntry.action = 'errored'
     logEntry.error = error.message
 
@@ -363,6 +380,8 @@ async function handleConfirmReplace(
             skipped: state.skipped,
             errored: state.errored + 1,
             log: [...state.log, logEntry],
+            scannedTotal: 0,
+            noBrokenFound: false,
           }),
     } as AppState)
 
@@ -392,13 +411,16 @@ async function handleConfirmReplace(
       currentIndex: nextIndex,
     })
     const next = state.broken[nextIndex]
-    if (next) await scrollToTrack(next.videoId)
+    if (next) await scrollToTrack(next.videoId, next.title)
   } else {
     await saveSession({
       view: 'done',
       ...baseNext,
+      scannedTotal: 0,
+      noBrokenFound: false,
     })
     await clearHighlight()
+    await reloadPlaylistTab()
   }
 }
 
@@ -426,7 +448,7 @@ async function handleSkipTrack(): Promise<void> {
       log: state.log,
     })
     const next = state.broken[nextIndex]
-    if (next) await scrollToTrack(next.videoId)
+    if (next) await scrollToTrack(next.videoId, next.title)
   } else {
     await saveSession({
       view: 'done',
@@ -437,6 +459,8 @@ async function handleSkipTrack(): Promise<void> {
       skipped: state.skipped + 1,
       errored: state.errored,
       log: state.log,
+      scannedTotal: 0,
+      noBrokenFound: false,
     })
     await clearHighlight()
   }
@@ -469,6 +493,7 @@ async function handleAckManualSort(): Promise<void> {
 async function handleStopFixing(): Promise<void> {
   const state = await loadSession()
   if (state.view !== 'reviewing' && state.view !== 'fixing') return
+  const hadFixes = state.fixed > 0
   await clearHighlight()
   await saveSession({
     view: 'done',
@@ -479,7 +504,10 @@ async function handleStopFixing(): Promise<void> {
     skipped: state.skipped,
     errored: state.errored,
     log: state.log,
+    scannedTotal: 0,
+    noBrokenFound: false,
   })
+  if (hadFixes) await reloadPlaylistTab()
 }
 
 async function handleRescan(): Promise<void> {
@@ -521,15 +549,75 @@ async function handleDownloadBackup(): Promise<void> {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function friendlyApiError(err: unknown): Error {
+  if (err instanceof YouTubeApiError) {
+    if (err.isManualSortRequired) {
+      return new Error(
+        'This playlist must use Manual sort order. In YouTube Music, open the playlist → sort menu → choose Manual, then try again.',
+      )
+    }
+    if (err.isQuotaExceeded) {
+      return new Error('YouTube API daily quota exceeded. Try again tomorrow.')
+    }
+    if (err.isForbidden) {
+      return new Error(
+        `YouTube API permission denied: ${err.message}. Make sure you own this playlist and are signed into the correct account.`,
+      )
+    }
+    return new Error(err.message)
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
+
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   return tabs[0]
 }
 
-async function scrollToTrack(videoId: string): Promise<void> {
+async function reloadPlaylistTab(): Promise<void> {
   const tab = await getActiveTab()
-  if (tab?.id) {
-    chrome.tabs.sendMessage(tab.id, { type: 'SCROLL_TO', videoId }).catch(() => {})
+  if (!tab?.id || !tab.url?.includes('music.youtube.com')) return
+
+  await chrome.tabs.reload(tab.id)
+
+  await new Promise<void>((resolve) => {
+    const tabId = tab.id!
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated)
+      resolve()
+    }, 20_000)
+
+    function onUpdated(updatedId: number, info: chrome.tabs.TabChangeInfo): void {
+      if (updatedId === tabId && info.status === 'complete') {
+        clearTimeout(timeout)
+        chrome.tabs.onUpdated.removeListener(onUpdated)
+        resolve()
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(onUpdated)
+  })
+
+  // YT Music needs a moment to render the playlist shelf after load
+  await new Promise((r) => setTimeout(r, 2000))
+}
+
+async function scrollToTrack(videoId: string, title?: string): Promise<void> {
+  const tab = await getActiveTab()
+  if (!tab?.id) return
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500))
+    try {
+      const resp = (await chrome.tabs.sendMessage(tab.id, {
+        type: 'SCROLL_TO',
+        videoId,
+        title,
+      })) as { ok?: boolean; found?: boolean }
+      if (resp?.found) return
+    } catch {
+      // Content script may not be ready yet after reload
+    }
   }
 }
 

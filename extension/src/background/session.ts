@@ -58,6 +58,9 @@ export type AppState =
       skipped: number
       errored: number
       log: SessionLogEntry[]
+      scannedTotal: number
+      noBrokenFound: boolean
+      scanIncomplete?: boolean
     }
 
 export interface SessionLogEntry {

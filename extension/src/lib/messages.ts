@@ -43,7 +43,7 @@ export type AppMsg =
   // Service worker → content script
   | { type: 'DO_SCAN'; playlistId: string }
   | { type: 'CANCEL_SCAN_CS' }
-  | { type: 'SCROLL_TO'; videoId: string }
+  | { type: 'SCROLL_TO'; videoId: string; title?: string }
   | { type: 'CLEAR_HIGHLIGHT' }
 
   // Service worker → side panel (via storage events or direct message)

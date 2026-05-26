@@ -90,8 +90,13 @@ function renderSignedOut(): void {
   `
   document.getElementById('btn-sign-in')!.addEventListener('click', async () => {
     setLoading(true)
-    await send({ type: 'SIGN_IN' })
-    await refresh()
+    try {
+      await send({ type: 'SIGN_IN' })
+      await refresh()
+    } catch (err) {
+      await refresh()
+      showError((err as Error).message)
+    }
   })
 }
 
@@ -166,15 +171,14 @@ async function patchReadyAck(): Promise<void> {
 }
 
 function renderScanning(state: Extract<AppState, { view: 'scanning' }>): void {
-  const pct = state.scanned === 0 ? 0 : Math.min(95, state.scanned / 50)
   main.innerHTML = `
     <div class="card">
       <div class="card-title">Scanning playlist…</div>
       <p class="progress-label">Scanned <strong>${state.scanned}</strong> tracks — <strong>${state.foundBroken}</strong> unplayable found</p>
       <div class="progress-wrap">
-        <div class="progress-fill" style="width:${pct}%"></div>
+        <div class="progress-fill" style="width:${state.scanned > 0 ? Math.min(95, state.scanned / 50) : 5}%"></div>
       </div>
-      <p class="text-sm" style="margin-top:6px">Scrolling through the playlist…</p>
+      <p class="text-sm" style="margin-top:6px">Scrolling through the playlist — large playlists may take several minutes. Keep this tab visible. The unplayable count is refined once the scan finishes.</p>
     </div>
     <button id="btn-cancel-scan" class="btn btn-secondary btn-full">Cancel scan</button>
   `
@@ -219,8 +223,13 @@ function renderReviewing(state: Extract<AppState, { view: 'reviewing' }>): void 
 
   document.getElementById('btn-replace')!.addEventListener('click', async () => {
     setLoading(true)
-    await send({ type: 'REQUEST_CANDIDATES', title: current.title, videoId: current.videoId })
-    await refresh()
+    try {
+      await send({ type: 'REQUEST_CANDIDATES', title: current.title, videoId: current.videoId })
+      await refresh()
+    } catch (err) {
+      await refresh()
+      showError((err as Error).message)
+    }
   })
 
   document.getElementById('btn-skip')!.addEventListener('click', async () => {
@@ -278,10 +287,11 @@ function renderFixing(state: Extract<AppState, { view: 'fixing' }>): void {
     setLoading(true)
     try {
       await send({ type: 'CONFIRM_REPLACE', piId: current.piId, newVideoId: selected, title: current.title })
+      await refresh()
     } catch (err) {
+      await refresh()
       showError((err as Error).message)
     }
-    await refresh()
   })
 
   document.getElementById('btn-back')!.addEventListener('click', async () => {
@@ -293,36 +303,63 @@ function renderFixing(state: Extract<AppState, { view: 'fixing' }>): void {
     const q = (document.getElementById('search-input') as HTMLInputElement).value.trim()
     if (!q) return
     setLoading(true)
-    await send({ type: 'REQUEST_CANDIDATES', title: q, videoId: current.videoId })
-    await refresh()
+    try {
+      await send({ type: 'REQUEST_CANDIDATES', title: q, videoId: current.videoId })
+      await refresh()
+    } catch (err) {
+      await refresh()
+      showError((err as Error).message)
+    }
   })
 }
 
 function renderDone(state: Extract<AppState, { view: 'done' }>): void {
-  main.innerHTML = `
-    <div class="status-msg" style="margin-bottom:12px">
-      <span class="emoji">✅</span>
-      <h2>All done!</h2>
-    </div>
+  if (state.noBrokenFound) {
+    const incompleteMsg = state.scanIncomplete
+      ? `<div class="alert alert-warn" style="margin-bottom:12px">
+           Scan may be incomplete — only <strong>${state.scannedTotal}</strong> tracks were detected in the page.
+           Try scrolling the playlist manually once, then scan again. Keep this tab in focus during the scan.
+         </div>`
+      : `<p class="text-sm" style="text-align:center;margin-bottom:12px">
+           Scanned <strong>${state.scannedTotal}</strong> tracks. None were unplayable on YouTube Music.
+         </p>`
 
-    <div class="stats-row">
-      <div class="stat-chip fixed"><div class="stat-value">${state.fixed}</div><div class="stat-label">Fixed</div></div>
-      <div class="stat-chip skipped"><div class="stat-value">${state.skipped}</div><div class="stat-label">Skipped</div></div>
-      <div class="stat-chip errored"><div class="stat-value">${state.errored}</div><div class="stat-label">Errors</div></div>
-    </div>
+    main.innerHTML = `
+      <div class="status-msg" style="margin-bottom:12px">
+        <span class="emoji">${state.scanIncomplete ? '⚠️' : '✅'}</span>
+        <h2>${state.scanIncomplete ? 'Scan incomplete' : 'No broken tracks found'}</h2>
+      </div>
+      ${incompleteMsg}
+      <div class="action-row">
+        <button id="btn-rescan" class="btn btn-primary">Scan again</button>
+      </div>
+    `
+  } else {
+    main.innerHTML = `
+      <div class="status-msg" style="margin-bottom:12px">
+        <span class="emoji">✅</span>
+        <h2>All done!</h2>
+      </div>
 
-    <div class="action-row" style="margin-top:4px">
-      <button id="btn-rescan" class="btn btn-primary">Scan again</button>
-      <button id="btn-export" class="btn btn-secondary">Export log</button>
-    </div>
-  `
+      <div class="stats-row">
+        <div class="stat-chip fixed"><div class="stat-value">${state.fixed}</div><div class="stat-label">Fixed</div></div>
+        <div class="stat-chip skipped"><div class="stat-value">${state.skipped}</div><div class="stat-label">Skipped</div></div>
+        <div class="stat-chip errored"><div class="stat-value">${state.errored}</div><div class="stat-label">Errors</div></div>
+      </div>
+
+      <div class="action-row" style="margin-top:4px">
+        <button id="btn-rescan" class="btn btn-primary">Scan again</button>
+        <button id="btn-export" class="btn btn-secondary">Export log</button>
+      </div>
+    `
+  }
 
   document.getElementById('btn-rescan')!.addEventListener('click', async () => {
     await send({ type: 'RESCAN' })
     await refresh()
   })
 
-  document.getElementById('btn-export')!.addEventListener('click', async () => {
+  document.getElementById('btn-export')?.addEventListener('click', async () => {
     await send({ type: 'EXPORT_LOG' })
   })
 }

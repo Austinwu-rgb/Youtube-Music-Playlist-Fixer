@@ -1,13 +1,19 @@
 // Scroll-until-stable DOM scanner for YouTube Music playlist pages.
-// Drives the scan loop from the content script (stable page context) and
-// streams progress to the service worker via chrome.runtime.sendMessage.
 
-import { SELECTORS, videoIdFromHref } from '../lib/dom-selectors.js'
+import {
+  SELECTORS,
+  videoIdFromHref,
+  queryAllRows,
+  getExpectedTrackCount,
+  isUnplayableRow,
+} from '../lib/dom-selectors.js'
 import type { ScannedRow } from '../lib/messages.js'
 
 const MAX_HARD_CAP = 20_000
-const STABLE_TICKS_REQUIRED = 3
-const RENDER_WAIT_MS = 200
+const STABLE_TICKS_REQUIRED = 5
+const RENDER_WAIT_MS = 350
+const SCROLL_STEP_PX = 700
+const MAX_SCROLL_ITERATIONS = 500
 
 interface RowData extends ScannedRow {
   element: Element
@@ -23,54 +29,65 @@ export function cancelScan(): void {
   scanning = false
 }
 
-/**
- * Run the scroll-until-stable scan.
- * Calls onProgress(scanned, foundBroken) as rows are discovered.
- * Resolves with the full list of ScannedRows when done or cancelled.
- */
 export async function runScan(
   onProgress: (scanned: number, foundBroken: number) => void,
 ): Promise<ScannedRow[]> {
   scanning = true
 
   const container = findScrollContainer()
-  if (!container) {
-    scanning = false
-    return []
-  }
-
+  const expectedTotal = getExpectedTrackCount()
   const seen = new Map<string, RowData>()
   let stableTicks = 0
   let lastCount = 0
+  let iterations = 0
+  let lastScrollTop = getScrollTop(container)
 
-  while (scanning && stableTicks < STABLE_TICKS_REQUIRED) {
-    // Scroll to bottom
-    container.scrollTop = container.scrollHeight
+  // Start from top of playlist
+  scrollToTop(container)
+  await waitForRender(RENDER_WAIT_MS)
 
-    // Wait for virtual list to render new rows
-    await waitForRender(RENDER_WAIT_MS)
+  while (scanning && iterations < MAX_SCROLL_ITERATIONS) {
+    iterations++
 
-    if (!scanning) break
-
-    // Scan currently visible rows
-    const rows = document.querySelectorAll(SELECTORS.row)
-    for (const el of rows) {
+    // Collect all currently rendered rows
+    for (const el of queryAllRows()) {
       const data = parseRow(el)
-      seen.set(data.key, data)
+      if (data.key && data.key !== 'title:') {
+        const prev = seen.get(data.key)
+        if (prev?.isUnplayable) data.isUnplayable = true
+        seen.set(data.key, data)
+      }
     }
 
     const brokenCount = countUnplayable(seen)
     onProgress(seen.size, brokenCount)
 
-    const atBottom =
-      Math.abs(container.scrollTop + container.clientHeight - container.scrollHeight) <= 4
+    // Done if we reached the playlist's advertised track count
+    if (expectedTotal !== null && seen.size >= expectedTotal) {
+      break
+    }
 
-    if (seen.size === lastCount && atBottom) {
+    // Scroll down one step + bring last row into view (drives virtualized lists)
+    scrollDown(container)
+    await waitForRender(RENDER_WAIT_MS)
+
+    if (!scanning) break
+
+    const newScrollTop = getScrollTop(container)
+    const scrollMoved = Math.abs(newScrollTop - lastScrollTop) > 2
+    lastScrollTop = newScrollTop
+
+    const countGrew = seen.size > lastCount
+    if (!countGrew && !scrollMoved) {
       stableTicks++
     } else {
       stableTicks = 0
     }
     lastCount = seen.size
+
+    if (stableTicks >= STABLE_TICKS_REQUIRED) {
+      break
+    }
 
     if (seen.size >= MAX_HARD_CAP) break
   }
@@ -79,15 +96,71 @@ export async function runScan(
   return Array.from(seen.values()).map(({ element: _el, ...row }) => row)
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Scroll helpers ────────────────────────────────────────────────────────────
 
-function findScrollContainer(): Element | null {
-  const primary = document.querySelector(SELECTORS.scrollContainer)
-  if (primary) return primary
-  const fallback = document.querySelector(SELECTORS.scrollContainerFallback)
-  if (fallback) return fallback
-  // Last resort: the document element itself scrolls
-  return document.documentElement
+function findScrollContainer(): Element {
+  for (const sel of SELECTORS.scrollContainerCandidates) {
+    const el = document.querySelector(sel)
+    if (el && isScrollable(el)) return el
+  }
+
+  const rows = queryAllRows()
+  if (rows[0]) {
+    const ancestor = findScrollableAncestor(rows[0])
+    if (ancestor) return ancestor
+  }
+
+  return document.scrollingElement ?? document.documentElement
+}
+
+function isScrollable(el: Element): boolean {
+  const style = getComputedStyle(el)
+  const oy = style.overflowY
+  if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') return false
+  return el.scrollHeight > el.clientHeight + 20
+}
+
+function findScrollableAncestor(el: Element): Element | null {
+  let node: Element | null = el.parentElement
+  while (node && node !== document.documentElement) {
+    if (isScrollable(node)) return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function getScrollTop(container: Element): number {
+  if (container === document.documentElement || container === document.body) {
+    return window.scrollY
+  }
+  return container.scrollTop
+}
+
+function scrollToTop(container: Element): void {
+  if (container === document.documentElement || container === document.body) {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  } else {
+    container.scrollTop = 0
+  }
+}
+
+function scrollDown(container: Element): void {
+  const rows = queryAllRows()
+  const last = rows[rows.length - 1]
+
+  // Primary: scroll the last visible row into view (best for virtualized lists)
+  if (last) {
+    last.scrollIntoView({ block: 'end', behavior: 'instant' })
+  }
+
+  // Secondary: nudge scroll container / window
+  if (container === document.documentElement || container === document.body) {
+    window.scrollBy({ top: SCROLL_STEP_PX, behavior: 'instant' })
+  } else {
+    container.scrollTop += SCROLL_STEP_PX
+    // Also try scrolling the window — YT Music often uses page-level scroll
+    window.scrollBy({ top: SCROLL_STEP_PX, behavior: 'instant' })
+  }
 }
 
 function waitForRender(ms: number): Promise<void> {
@@ -96,63 +169,39 @@ function waitForRender(ms: number): Promise<void> {
   )
 }
 
+// ── Row parsing ───────────────────────────────────────────────────────────────
+
+function elementText(el: Element | null | undefined): string {
+  if (!el) return ''
+  return el.textContent?.trim() || el.getAttribute('title')?.trim() || ''
+}
+
 function parseRow(el: Element): RowData {
-  // --- Extract videoId ---
   const anchor = el.querySelector(SELECTORS.rowTitleLink) as HTMLAnchorElement | null
   const videoId = anchor ? videoIdFromHref(anchor.href) : null
 
-  // --- Extract title ---
   const titleEl =
-    anchor ??
-    (el.querySelector(SELECTORS.rowTitleText) as HTMLElement | null)
-  const title = titleEl?.textContent?.trim() ?? ''
+    anchor ?? (el.querySelector(SELECTORS.rowTitleText) as HTMLElement | null)
+  const title = elementText(titleEl)
 
-  // --- Extract channel ---
   const channelEl = el.querySelector(SELECTORS.rowChannelText) as HTMLElement | null
-  const channelTitle = channelEl?.textContent?.trim() ?? ''
+  const channelTitle = elementText(channelEl)
 
-  // --- Determine unplayable ---
-  const isUnplayable = detectUnplayable(el)
-
-  // Stable key: prefer videoId; fall back to title hash
+  const isUnplayable = isUnplayableRow(el)
   const key = videoId ?? `title:${title}`
 
   return { key, videoId, title, channelTitle, isUnplayable, element: el }
 }
 
-function detectUnplayable(el: Element): boolean {
-  // Signal 1: play button is aria-disabled or absent
-  const playBtn = el.querySelector(SELECTORS.playButton)
-  if (playBtn?.getAttribute('aria-disabled') === 'true') return true
-  if (playBtn?.hasAttribute('disabled')) return true
-
-  // Signal 2: no play button at all when other sibling rows have one
-  // (we check this loosely — if the element has no anchor for the track title,
-  //  it's likely unavailable)
-  if (!el.querySelector(SELECTORS.rowTitleLink)) {
-    // Extra guard: also check for unavailable text
-    const text = el.textContent ?? ''
-    for (const hint of SELECTORS.unavailableTextHints) {
-      if (text.includes(hint)) return true
-    }
-  }
-
-  // Signal 3: explicit unavailable text in the row
-  const text = el.textContent ?? ''
-  for (const hint of SELECTORS.unavailableTextHints) {
-    if (new RegExp(`\\b${hint}\\b`, 'i').test(text)) return true
-  }
-
-  // Signal 4: opacity / greyed-out style class
-  // YT Music adds an 'unplayable' or 'disabled' CSS class on the renderer
-  const classes = el.className + ' ' + (el.getAttribute('disabled') ?? '')
-  if (/\bunplayable\b|\bdisabled\b/i.test(classes)) return true
-
-  return false
-}
-
 function countUnplayable(seen: Map<string, RowData>): number {
+  const counted = new Set<string>()
   let n = 0
-  for (const r of seen.values()) if (r.isUnplayable) n++
+  for (const r of seen.values()) {
+    if (!r.isUnplayable) continue
+    const dedupeKey = (r.videoId ?? r.title.trim().toLowerCase()) || r.key
+    if (counted.has(dedupeKey)) continue
+    counted.add(dedupeKey)
+    n++
+  }
   return n
 }
