@@ -1,7 +1,7 @@
 // Persisted session state in chrome.storage.session.
 // MV3 service workers terminate after ~30s idle; all mutable state lives here.
 
-import type { BrokenTrack, CandidateVideo } from '../lib/messages.js'
+import type { BrokenTrack, CandidateVideo, FixedTrackRef } from '../lib/messages.js'
 
 export type AppState =
   | { view: 'signed-out' }
@@ -48,6 +48,18 @@ export type AppState =
       log: SessionLogEntry[]
       candidates: CandidateVideo[]
       searchQuery: string
+    }
+  | {
+      view: 'reviewing-fixes'
+      channelId: string
+      channelTitle: string
+      playlistId: string
+      fixedTracks: FixedTrackRef[]
+      currentReviewIndex: number
+      fixed: number
+      skipped: number
+      errored: number
+      log: SessionLogEntry[]
     }
   | {
       view: 'done'

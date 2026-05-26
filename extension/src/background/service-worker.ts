@@ -19,7 +19,7 @@ import { insertAt, deleteItem } from '../lib/replace.js'
 import { downloadBackup } from '../lib/backup.js'
 import { getQuotaStatus } from '../lib/quota.js'
 import { loadSession, saveSession, clearSession, type AppState, type SessionLogEntry } from './session.js'
-import type { AppMsg, BrokenTrack, ScannedRow } from '../lib/messages.js'
+import type { AppMsg, BrokenTrack, ScannedRow, FixedTrackRef } from '../lib/messages.js'
 
 // ── Action: open side panel when the toolbar icon is clicked ────────────────
 chrome.action.onClicked.addListener((tab) => {
@@ -88,6 +88,12 @@ async function handleMessage(msg: AppMsg, sender: chrome.runtime.MessageSender):
 
     case 'ACK_MANUAL_SORT':
       return handleAckManualSort()
+
+    case 'NEXT_FIXED_REVIEW':
+      return handleNextFixedReview()
+
+    case 'SKIP_FIX_REVIEW':
+      return handleSkipFixReview()
 
     default:
       throw new Error(`Unknown message type: ${(msg as { type: string }).type}`)
@@ -388,6 +394,8 @@ async function handleConfirmReplace(
     throw error
   }
 
+  await markFixedOnTab(current.title, current.videoId, logEntry.replacementTitle)
+
   const nextIndex = state.currentIndex + 1
   const hasMore = nextIndex < state.broken.length
 
@@ -413,14 +421,15 @@ async function handleConfirmReplace(
     const next = state.broken[nextIndex]
     if (next) await scrollToTrack(next.videoId, next.title)
   } else {
-    await saveSession({
-      view: 'done',
-      ...baseNext,
-      scannedTotal: 0,
-      noBrokenFound: false,
+    await finishFixingWithReview({
+      channelId: state.channelId,
+      channelTitle: state.channelTitle,
+      playlistId: state.playlistId,
+      fixed: state.fixed + 1,
+      skipped: state.skipped,
+      errored: state.errored,
+      log: updatedLog,
     })
-    await clearHighlight()
-    await reloadPlaylistTab()
   }
 }
 
@@ -493,10 +502,8 @@ async function handleAckManualSort(): Promise<void> {
 async function handleStopFixing(): Promise<void> {
   const state = await loadSession()
   if (state.view !== 'reviewing' && state.view !== 'fixing') return
-  const hadFixes = state.fixed > 0
   await clearHighlight()
-  await saveSession({
-    view: 'done',
+  await finishFixingWithReview({
     channelId: state.channelId,
     channelTitle: state.channelTitle,
     playlistId: state.playlistId,
@@ -504,10 +511,27 @@ async function handleStopFixing(): Promise<void> {
     skipped: state.skipped,
     errored: state.errored,
     log: state.log,
-    scannedTotal: 0,
-    noBrokenFound: false,
   })
-  if (hadFixes) await reloadPlaylistTab()
+}
+
+async function handleNextFixedReview(): Promise<void> {
+  const state = await loadSession()
+  if (state.view !== 'reviewing-fixes') throw new Error('Not reviewing fixes')
+
+  const nextIndex = state.currentReviewIndex + 1
+  if (nextIndex >= state.fixedTracks.length) {
+    await finishFixReview(state)
+    return
+  }
+
+  await saveSession({ ...state, currentReviewIndex: nextIndex })
+  await scrollToFixedTrackOnTab(state.fixedTracks[nextIndex].videoId, false)
+}
+
+async function handleSkipFixReview(): Promise<void> {
+  const state = await loadSession()
+  if (state.view !== 'reviewing-fixes') return
+  await finishFixReview(state)
 }
 
 async function handleRescan(): Promise<void> {
@@ -567,6 +591,105 @@ function friendlyApiError(err: unknown): Error {
     return new Error(err.message)
   }
   return err instanceof Error ? err : new Error(String(err))
+}
+
+function fixedTracksFromLog(log: SessionLogEntry[]): FixedTrackRef[] {
+  return log
+    .filter((e) => e.action === 'fixed' && e.replacementVideoId)
+    .sort((a, b) => a.position - b.position)
+    .map((e) => ({
+      videoId: e.replacementVideoId!,
+      title: e.replacementTitle ?? e.originalTitle,
+    }))
+}
+
+async function scrollToFixedTrackOnTab(videoId: string, fromTop: boolean): Promise<void> {
+  const tab = await getActiveTab()
+  if (!tab?.id) return
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500))
+    try {
+      const resp = (await chrome.tabs.sendMessage(tab.id, {
+        type: 'SCROLL_TO_FIXED',
+        videoId,
+        fromTop,
+      })) as { found?: boolean }
+      if (resp?.found) return
+    } catch {
+      // Content script may not be ready yet after reload
+    }
+  }
+}
+
+async function clearFixedMarkersOnTab(): Promise<void> {
+  const tab = await getActiveTab()
+  if (tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_FIXED_MARKERS' }).catch(() => {})
+  }
+}
+
+async function markFixedOnTab(
+  title: string,
+  videoId: string,
+  replacementTitle?: string,
+): Promise<void> {
+  const tab = await getActiveTab()
+  if (!tab?.id) return
+  chrome.tabs
+    .sendMessage(tab.id, { type: 'MARK_FIXED', title, videoId, replacementTitle })
+    .catch(() => {})
+}
+
+async function finishFixReview(
+  state: Extract<AppState, { view: 'reviewing-fixes' }>,
+): Promise<void> {
+  await clearFixedMarkersOnTab()
+  await saveSession({
+    view: 'done',
+    channelId: state.channelId,
+    channelTitle: state.channelTitle,
+    playlistId: state.playlistId,
+    fixed: state.fixed,
+    skipped: state.skipped,
+    errored: state.errored,
+    log: state.log,
+    scannedTotal: 0,
+    noBrokenFound: false,
+  })
+}
+
+interface FixSessionSummary {
+  channelId: string
+  channelTitle: string
+  playlistId: string
+  fixed: number
+  skipped: number
+  errored: number
+  log: SessionLogEntry[]
+}
+
+async function finishFixingWithReview(summary: FixSessionSummary): Promise<void> {
+  const fixedTracks = fixedTracksFromLog(summary.log)
+  await reloadPlaylistTab()
+
+  if (fixedTracks.length === 0) {
+    await saveSession({
+      view: 'done',
+      ...summary,
+      scannedTotal: 0,
+      noBrokenFound: false,
+    })
+    return
+  }
+
+  await saveSession({
+    view: 'reviewing-fixes',
+    ...summary,
+    fixedTracks,
+    currentReviewIndex: 0,
+  })
+  await scrollToFixedTrackOnTab(fixedTracks[0].videoId, true)
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab | undefined> {

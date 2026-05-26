@@ -1,6 +1,11 @@
 // Typed message protocol for all chrome.runtime.sendMessage calls across
 // service-worker, content script, and side panel.
 
+export interface FixedTrackRef {
+  videoId: string
+  title: string
+}
+
 export interface BrokenTrack {
   videoId: string
   title: string
@@ -34,6 +39,8 @@ export type AppMsg =
   | { type: 'EXPORT_LOG' }
   | { type: 'DOWNLOAD_BACKUP' }
   | { type: 'ACK_MANUAL_SORT' }
+  | { type: 'NEXT_FIXED_REVIEW' }
+  | { type: 'SKIP_FIX_REVIEW' }
 
   // Content script → service worker
   | { type: 'PAGE_INFO'; playlistId: string | null; onPlaylistPage: boolean }
@@ -45,6 +52,9 @@ export type AppMsg =
   | { type: 'CANCEL_SCAN_CS' }
   | { type: 'SCROLL_TO'; videoId: string; title?: string }
   | { type: 'CLEAR_HIGHLIGHT' }
+  | { type: 'MARK_FIXED'; title: string; videoId: string; replacementTitle?: string }
+  | { type: 'SCROLL_TO_FIXED'; videoId: string; fromTop?: boolean }
+  | { type: 'CLEAR_FIXED_MARKERS' }
 
   // Service worker → side panel (via storage events or direct message)
   | { type: 'STATE_UPDATE' }

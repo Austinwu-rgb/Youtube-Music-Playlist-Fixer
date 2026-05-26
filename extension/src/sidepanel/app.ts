@@ -68,6 +68,7 @@ function render(state: AppState): void {
     case 'scanning':        return renderScanning(state)
     case 'reviewing':       return renderReviewing(state)
     case 'fixing':          return renderFixing(state)
+    case 'reviewing-fixes': return renderReviewingFixes(state)
     case 'done':            return renderDone(state)
   }
 }
@@ -310,6 +311,49 @@ function renderFixing(state: Extract<AppState, { view: 'fixing' }>): void {
       await refresh()
       showError((err as Error).message)
     }
+  })
+}
+
+function renderReviewingFixes(state: Extract<AppState, { view: 'reviewing-fixes' }>): void {
+  const current = state.fixedTracks[state.currentReviewIndex]
+  if (!current) {
+    send({ type: 'SKIP_FIX_REVIEW' }).then(() => refresh())
+    return
+  }
+
+  const isLast = state.currentReviewIndex >= state.fixedTracks.length - 1
+
+  main.innerHTML = `
+    <div class="card">
+      <div class="card-title">Verify fixed track ${state.currentReviewIndex + 1} of ${state.fixedTracks.length}</div>
+      <p class="text-sm" style="margin-bottom:10px">
+        The playlist has reloaded. Check that the highlighted track (green outline) plays correctly,
+        then continue when you're ready.
+      </p>
+      <div class="track-info">
+        <div class="track-title">${esc(current.title)}</div>
+      </div>
+      <div class="action-row" style="margin-top:12px">
+        <button id="btn-next-fixed" class="btn btn-primary">${isLast ? 'Finish' : 'Next fixed track'}</button>
+        <button id="btn-skip-review" class="btn btn-secondary">Skip to summary</button>
+      </div>
+    </div>
+  `
+
+  document.getElementById('btn-next-fixed')!.addEventListener('click', async () => {
+    setLoading(true)
+    try {
+      await send({ type: 'NEXT_FIXED_REVIEW' })
+      await refresh()
+    } catch (err) {
+      await refresh()
+      showError((err as Error).message)
+    }
+  })
+
+  document.getElementById('btn-skip-review')!.addEventListener('click', async () => {
+    await send({ type: 'SKIP_FIX_REVIEW' })
+    await refresh()
   })
 }
 

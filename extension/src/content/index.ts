@@ -6,6 +6,12 @@
 
 import { runScan, cancelScan } from './scanner.js'
 import { highlightAndScroll, clearHighlight } from './highlighter.js'
+import {
+  markFixedPlaceholder,
+  scrollToFixedTrack,
+  clearFixedMarkers,
+  clearReviewHighlights,
+} from './fixed-marker.js'
 import type { AppMsg } from '../lib/messages.js'
 
 // ── Page info reporting ───────────────────────────────────────────────────────
@@ -71,6 +77,21 @@ async function handleMsg(msg: AppMsg): Promise<{ ok: boolean }> {
 
     case 'CLEAR_HIGHLIGHT':
       clearHighlight()
+      return { ok: true }
+
+    case 'MARK_FIXED': {
+      const found = markFixedPlaceholder(msg.title, msg.videoId, msg.replacementTitle)
+      return { ok: true, found }
+    }
+
+    case 'SCROLL_TO_FIXED': {
+      const found = await scrollToFixedTrack(msg.videoId, msg.fromTop ?? false)
+      return { ok: true, found }
+    }
+
+    case 'CLEAR_FIXED_MARKERS':
+      clearFixedMarkers()
+      clearReviewHighlights()
       return { ok: true }
 
     default:
