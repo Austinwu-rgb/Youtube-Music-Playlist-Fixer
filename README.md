@@ -2,6 +2,12 @@
 
 A Chrome extension that finds unplayable tracks in your YouTube Music playlists and lets you replace them one-by-one with working alternatives — all through the official YouTube Data API.
 
+## Demo:
+
+https://github.com/user-attachments/assets/c07bc094-40c7-4c63-a971-24326f380bee
+
+
+
 ## What it does
 
 YouTube Music sometimes shows tracks as unavailable (greyed out) even though the same video still exists on regular YouTube. This extension:
