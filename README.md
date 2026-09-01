@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/9ef1cf91-230d-4809-827d-4e051dec1540
 
 ## How it works
 
-Sometimes a track shows as unavailable due to various reasons such as if the track is re-uploaded by the artist/publisher. This extension:
+Tracks on Youtube Music can become unplayable due to various reasons (I.e. the track is re-uploaded by the artist/publisher). This extension:
 
 1. Scrolls through your playlist on `music.youtube.com` and picks out unplayable tracks from the page DOM.
 2. Shows each broken track one at a time. Replace it or skip it.
