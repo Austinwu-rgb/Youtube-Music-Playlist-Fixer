@@ -4,7 +4,9 @@ A Chrome extension that finds unplayable tracks in your YouTube Music playlists 
 
 ## Demo:
 
-https://github.com/user-attachments/assets/c07bc094-40c7-4c63-a971-24326f380bee
+https://github.com/user-attachments/assets/9ef1cf91-230d-4809-827d-4e051dec1540
+
+
 
 
 
