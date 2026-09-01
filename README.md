@@ -1,83 +1,72 @@
 # YouTube Music Replacer
 
-A Chrome extension that finds unplayable tracks in your YouTube Music playlists and lets you replace them one-by-one with working alternatives — all through the official YouTube Data API.
+Chrome extension for fixing greyed-out tracks in YouTube Music playlists. It scans a playlist, finds entries that won't play, and lets you swap each one for a working version through the official YouTube Data API.
 
-## Demo:
+## Demo
 
 https://github.com/user-attachments/assets/9ef1cf91-230d-4809-827d-4e051dec1540
 
+## How it works
 
+Sometimes a track shows as unavailable in YouTube Music even though the video still exists on regular YouTube. This extension:
 
+1. Scrolls through your playlist on `music.youtube.com` and picks out unplayable tracks from the page DOM.
+2. Shows each broken track one at a time. Replace it or skip it.
+3. Searches for candidates and ranks them (channel name, duration, etc.).
+4. Inserts the replacement at the same playlist position, then deletes the old entry.
 
+Unplayable detection reads the page. Actual playlist edits go through YouTube Data API v3.
 
-## What it does
+## Setup
 
-YouTube Music sometimes shows tracks as unavailable (greyed out) even though the same video still exists on regular YouTube. This extension:
+Build instructions and Google Cloud OAuth setup are in **[docs/SETUP.md](docs/SETUP.md)**. Short version:
 
-1. **Scans** your playlist on `music.youtube.com` by scrolling through it and detecting DOM signals for unplayable tracks.
-2. **Walks you through** each broken track — you can Replace or Skip.
-3. **Searches** for replacement candidates (ranked by channel quality).
-4. **Replaces** the track at its exact playlist position using `playlistItems.insert` then `playlistItems.delete`.
+- `npm install && npm run build`, then load the `build/` folder at `chrome://extensions`
+- Create a Chrome Extension OAuth client (extension ID must match)
+- Add your Google account as a test user on the OAuth consent screen
+- Set the playlist sort order to **Manual** in YouTube Music before scanning
 
-No unofficial YouTube Music API is used. Detection is done via DOM; fixes go through the official YouTube Data API v3.
+Chrome only for now. Sign-in uses `chrome.identity.getAuthToken`, which Edge does not support.
 
-## Quick start
-
-See **[docs/SETUP.md](docs/SETUP.md)** for the full setup guide, including:
-
-- Building the extension
-- Pinning the extension ID (required for OAuth)
-- Creating a Chrome Extension OAuth client in Google Cloud
-- Adding test users to the OAuth consent screen
-- Setting playlist sort order to Manual
-
-## Architecture
+## Project layout
 
 ```
 Chrome Extension (Manifest V3)
-├── background/service-worker.ts   — OAuth, all YouTube API calls, state machine
-├── content/index.ts               — DOM scan, scroll, highlight (runs on music.youtube.com)
-│   ├── scanner.ts                 — Scroll-until-stable, unplayable detection
-│   └── highlighter.ts             — Scroll-to-track + red outline ring
-├── sidepanel/app.ts               — UI: sign-in → scan → review → fix → done
+├── background/service-worker.ts   OAuth, API calls, state machine
+├── content/index.ts               DOM scan and highlight on music.youtube.com
+│   ├── scanner.ts                 scroll + unplayable detection
+│   └── highlighter.ts             scroll-to-track + outline
+├── sidepanel/app.ts               sign in → scan → review → fix
 └── lib/
-    ├── auth.ts                    — chrome.identity.getAuthToken
-    ├── youtube-api.ts             — Authenticated fetch with 401 retry
-    ├── playlist.ts                — listPlaylistItems, position re-fetch
-    ├── search.ts                  — search.list + rank candidates
-    ├── replace.ts                 — insertAt, deleteItem
-    ├── backup.ts                  — Download JSON snapshot before first edit
-    ├── quota.ts                   — Daily unit tracker (10k/day limit)
-    ├── dom-selectors.ts           — Centralised YT Music CSS selectors
-    ├── messages.ts                — Typed chrome.runtime message protocol
-    └── session.ts                 — chrome.storage.session state persistence
+    ├── auth.ts                    chrome.identity.getAuthToken
+    ├── youtube-api.ts             authenticated fetch, 401 retry
+    ├── playlist.ts                list items, position re-fetch
+    ├── search.ts                  search.list + candidate ranking
+    ├── replace.ts                 insertAt, deleteItem
+    ├── backup.ts                  JSON snapshot before first edit
+    ├── quota.ts                   daily API unit counter (10k limit)
+    ├── dom-selectors.ts           YT Music CSS selectors (update when UI changes)
+    ├── messages.ts                typed chrome.runtime message protocol
+    └── session.ts                 chrome.storage.session persistence
 ```
 
 ## Development
 
-```powershell
+```bash
 npm install
-npm run dev       # watch mode — rebuild on file changes
-npm run build     # one-shot production build → build/
+npm run dev       # watch mode, rebuilds on save
+npm run build     # one-shot build to build/
 ```
 
-Load the `build/` folder as an unpacked extension in `chrome://extensions`.
+Reload the extension at `chrome://extensions` after each rebuild.
 
-## Privacy
+## Caveats
 
-No data is sent to any server other than Google's YouTube API. See [docs/PRIVACY.md](docs/PRIVACY.md).
+- Playlist sort must be **Manual** or inserts at a specific position will fail.
+- You can only edit playlists you own.
+- Each replacement search costs 100 API units (`search.list`). Default quota is 10,000/day.
+- YT Music UI updates can break DOM selectors. Fix them in `lib/dom-selectors.ts`.
 
-## Tech stack
+No data goes anywhere except Google's YouTube API. Details in [docs/PRIVACY.md](docs/PRIVACY.md).
 
-- Chrome Manifest V3 (service worker, side panel, content script)
-- TypeScript (strict mode)
-- Vite + @crxjs/vite-plugin
-- Vanilla DOM for the side panel UI (no framework)
-- YouTube Data API v3 + chrome.identity OAuth
-
-## Limitations
-
-- Playlist sort must be set to **Manual** in YouTube Music for position-aware inserts to work.
-- Only playlists you **own** can be edited via the YouTube Data API.
-- `search.list` costs 100 API units per track; default daily quota is 10,000 units.
-- DOM selectors may break after a YouTube Music UI update — fix in `lib/dom-selectors.ts`.
+Built with TypeScript, Vite, and `@crxjs/vite-plugin`. Side panel UI is plain DOM, no framework.
